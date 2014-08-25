@@ -268,4 +268,5 @@
   (future
     (loop []
       (health-check-instances)
-      (Thread/sleep 10000))))
+      (Thread/sleep 10000)
+      (recur))))
