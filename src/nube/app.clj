@@ -146,15 +146,16 @@
     (if-not (health-check-host host port)
       (do
         (stop-container host id)
-        (throw (Exception. "Failed to deploy new instance.")))
+        (Exception. "Failed to deploy new instance."))
       (try
-        (println "Adding" (str host ":" port) "to as pending")
+        (println "Adding" (str host ":" port) "pending")
         (add-pending-app-instance app (str host ":" port))
+        :ok
         (catch Exception e
           (println "Deploy failed. Rolling back.")
           (try (kill-app-instance app host port)
-               (throw (Exception. "Deployment failed. Rolling back."))
-               (catch Exception e (throw (Exception. "Rollback failed. System may be in an invalid state.")))))))))
+               (Exception. "Deployment failed. Rolling back.")
+               (catch Exception e (Exception. "Rollback failed. System may be in an invalid state."))))))))
 
 (defn deploy-new-app-instances [app image count internal-port]
   (let [count (if (string? count) (read-string count) count)
@@ -170,9 +171,10 @@
                         (if (< (dist host) ideal-count-per-host)
                           (recur (dec count) (update-in launching [host] inc))
                           launching))))]
-    (doseq [host hosts]
-      (dotimes [n (launching host)]
-        (deploy-app-instance app host (find-available-port host) internal-port image)))))
+    (let [launches (remove #(= :ok %) (pmap #(deploy-app-instance app % (find-available-port %) internal-port image)
+                                            (flatten (map (fn [[h n]] (repeat n h)) launching))))]
+      (when-not (empty? launches)
+        (throw (first launches))))))
 
 (defn deploy-app-instances [app image count internal-port]
   (println "Deploying" count app "with" image)
