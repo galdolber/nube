@@ -108,7 +108,8 @@
   (docker! :post host (str "containers/" id "/stop")))
 
 (defn stop-container-by-port [host port]
-  (stop-container host (:Id (load-container-by-host-and-port host port))))
+  (when-let [id (:Id (load-container-by-host-and-port host port))]
+    (stop-container host id)))
 
 (defn health-check-host [host port]
   (mark-host-health host
