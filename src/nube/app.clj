@@ -181,7 +181,8 @@
   (vec
    (for [instance (load-app-instances app)]
      (let [[host port] (ssplit instance)]
-       (docker! :get host (str "containers/" (:Id (load-container-by-host-and-port host port)) "/logs"))))))
+       (docker! :get host (str "containers/" (:Id (load-container-by-host-and-port host port))
+                               "/logs?stderr=1&stdout=1&timestamps=1"))))))
 
 (defn kill-app-instances [app]
   (doseq [instance (load-app-instances app)]
