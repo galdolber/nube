@@ -112,7 +112,7 @@
     (stop-container host id)))
 
 (defn health-check-host [host port]
-  (mark-host-health host
+  (mark-host-health (str host ":" port)
    (loop [n 10]
      (when (pos? n)
        (if (= 200 (:status @(http/get (str "http://" host ":" port "/") {:timeout 5000})))
@@ -124,7 +124,8 @@
 (defn health-check-instances []
   (doseq [l (vals (:instances @router))]
     (doseq [i l]
-      (health-check-host i 80))))
+      (let [[host port] (ssplit i)]
+        (health-check-host host port)))))
 
 (defn pull-docker-image [host image]
   (let [[image tag] (ssplit image)]
@@ -133,7 +134,8 @@
 (defn kill-app-instance [app host port]
   (println "Killing instance at" (str host ":" port))
   (stop-container-by-port host port)
-  (remove-app-instance app (str host ":" port)))
+  (remove-app-instance app (str host ":" port))
+  (mark-host-health (str host ":" port) true))
 
 (defn deploy-app-instance [app host port internal-port image]
   (println "Pulling new tags for" image)
