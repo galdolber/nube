@@ -117,7 +117,9 @@
      (when (pos? n)
        (if (= 200 (:status @(http/get (str "http://" host ":" port "/") {:timeout 5000})))
          true
-         (recur (dec n)))))))
+         (do
+           (Thread/sleep 1000)
+           (recur (dec n))))))))
 
 (defn health-check-instances []
   (doseq [i (vals (:instances @router))]
