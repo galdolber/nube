@@ -184,7 +184,7 @@
     (catch Exception e
       (println "Rolling back deploy")
       (doseq [instance (load-pending-app-instances app)]
-        (let [[host port] instance]          
+        (let [[host port] (ssplit instance)]          
           (stop-container-by-port host port))
         (remove-pending-app-instance app instance))
       (throw (Exception. "Deploy failed. Rolling back.")))))
