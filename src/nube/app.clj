@@ -142,17 +142,9 @@
                (throw (Exception. "Deployment failed. Rolling back."))
                (catch Exception e (throw (Exception. "Rollback failed. System may be in an invalid state.")))))))))
 
-(defn count-running-containers [host] (count (get-containers host)))
-
-(defn count-all-running-containers []
-  (into {} (map #(vector % (count-running-containers %)) (load-hosts))))
-
-(defn get-container-distribution []
-  (into {} (map #(vector % (count (get-containers %))) (load-hosts))))
-
 (defn deploy-new-app-instances [app image count]
   (let [count (if (string? count) (read-string count) count)
-        dist (get-container-distribution)
+        dist (into {} (map #(vector % (count (get-containers %))) (load-hosts)))
         total-containers (apply + (map second dist))
         hosts (vec (keys dist))
         total-hosts (clojure.core/count hosts)
