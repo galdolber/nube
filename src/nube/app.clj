@@ -185,9 +185,9 @@
       (println "Rolling back deploy")
       (doseq [instance (load-pending-app-instances app)]
         (let [[host port] instance]          
-          (stop-container host port))
+          (stop-container-by-port host port))
         (remove-pending-app-instance app instance))
-      (throw e))))
+      (throw (Exception. "Deploy failed. Rolling back.")))))
 
 (defn load-app-logs [app]
   (vec
