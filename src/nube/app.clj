@@ -211,21 +211,24 @@
                 "/kill" #'kill-app-instances}}])
 
 (defn controller-app [{:keys [params uri] :as req}]
-  (if-let [{:keys [handler route-params] :as all} (match-route routes uri)]
-    (let [params (merge (into {} (map (fn [[k v]] [(keyword k) v]) params)) route-params)
-          fn-params (mapv params (map (comp keyword name) (first (:arglists (meta handler)))))]
-      (try
-        {:status 200
-         :headers {"Content-Type" "text/plain"}
-         :body (pr-str {:data (or (apply (var-get handler) fn-params) :ok)})}
-        (catch Exception e
-          (.printStackTrace e)
-          {:status 500
-           :headers {"Content-Type" "text/plain"}
-           :body (pr-str {:error (.getMessage e)})})))
-    {:status 404
-     :headers {"Content-Type" "text/plain"}
-     :body (pr-str {:error "Page not found"})}))
+  (->> (if-let [{:keys [handler route-params] :as all} (match-route routes uri)]
+         (let [params (merge (into {} (map (fn [[k v]] [(keyword k) v]) params)) route-params)
+               fn-params (mapv params (map (comp keyword name) (first (:arglists (meta handler)))))]
+           (try
+             {:status 200
+              :headers {"Content-Type" "text/plain"}
+              :body (pr-str {:data (or (apply (var-get handler) fn-params) :ok)})}
+             (catch Exception e
+               (.printStackTrace e)
+               {:status 500
+                :headers {"Content-Type" "text/plain"}
+                :body (pr-str {:error (.getMessage e)})})))
+         {:status 404
+          :headers {"Content-Type" "text/plain"}
+          :body (pr-str {:error "Page not found"})})
+       (send! channel)
+       future
+       (with-channel req channel)))
 
 (defn extract-app [req] (first (ssplit ((:headers req) "host"))))
 
