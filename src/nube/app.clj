@@ -52,7 +52,7 @@
 
 (defn load-app-instances [app] (redis! (car/smembers (str app ":instances"))))
 (defn add-app-instance [app instance] (redis! (car/sadd (str app ":instances") instance) (notify-routers)))
-(defn remove-app-instance [app instance] (redis! (car/srem (str app ":instance") instance) (notify-routers)))
+(defn remove-app-instance [app instance] (redis! (car/srem (str app ":instances") instance) (notify-routers)))
 
 (defn load-hosts [] (redis! (car/smembers :hosts)))
 (defn add-host [host] (redis! (car/sadd :hosts host)))
@@ -94,7 +94,7 @@
   (rand-nth (vec (clojure.set/difference port-range (load-ports-in-use host)))))
 
 (defn load-container-by-host-and-port [host port]
-  (first (filter #(= port (:PublicPort (first (:Ports %)))) (get-containers host))))
+  (first (filter #(= port (str (:PublicPort (first (:Ports %))))) (get-containers host))))
 
 (defn stop-container [host id]
   (docker! :post host (str "containers/" id "/stop")))
@@ -131,7 +131,7 @@
     (println "Checking host health")
     (if-not (health-check-host host port)
       (do
-        ;(stop-container host id)
+        (stop-container host id)
         (throw (Exception. "Failed to deploy new instance.")))
       (try
         (println "Adding" (str host ":" port) "to router")
@@ -178,8 +178,8 @@
 
 (defn kill-app-instances [app]
   (doseq [instance (load-app-instances app)]
-    (let [[host port] instance]
-      kill-app-instance app host port)))
+    (let [[host port] (ssplit instance)]
+      (kill-app-instance app host port))))
 
 (defn describe []
   (into {} (for [app (load-apps)]
@@ -204,7 +204,7 @@
                          ["/add/" :env] #'add-app-env
                          ["/delete/" :env] #'remove-app-env}
                 "/logs" #'load-app-logs
-                "/kill" #'kill-app-instance}}])
+                "/kill" #'kill-app-instances}}])
 
 (defn controller-app [{:keys [params uri] :as req}]
   (if-let [{:keys [handler route-params] :as all} (match-route routes uri)]
