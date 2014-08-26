@@ -68,12 +68,12 @@
 
 (defn get-containers [host] (docker! :get host "containers/json"))
 
-(defn run-container [host port image envs]
-  (let [internal-port "80/tcp"
+(defn run-container [host port internal-port image envs]
+  (let [internal-port (or internal-port "80/tcp")
         options {:Hostname "" :User "" :AttachStdin false :AttachStdout true :AttachStderr true
                  :Tty true :OpenStdin false :StdinOnce false :Cmd nil :Volumes {} :Env envs
                  :Image image :ExposedPorts {internal-port {}}}
-        start-options {:PortBindings {"80/tcp" [{:HostPort (str port)}]}}
+        start-options {:PortBindings {internal-port [{:HostPort (str port)}]}}
         id (:Id (docker! :post host "containers/create"
                          {:headers {"Content-Type" "application/json"}
                           :body (json/write-str options)}))]
@@ -123,15 +123,15 @@
   (stop-container-by-port host port)
   (remove-app-instance app (str host ":" port)))
 
-(defn deploy-app-instance [app host port image]
+(defn deploy-app-instance [app host port internal-port image]
   (println "Pulling new tags for" image)
   (pull-docker-image host image)
   (println "Starting new container at" (str host ":" port))
-  (let [id (run-container host port image (load-app-envs app))]
+  (let [id (run-container host port internal-port image (load-app-envs app))]
     (println "Checking host health")
     (if-not (health-check-host host port)
       (do
-        (stop-container host id)
+        ;(stop-container host id)
         (throw (Exception. "Failed to deploy new instance.")))
       (try
         (println "Adding" (str host ":" port) "to router")
@@ -142,9 +142,9 @@
                (throw (Exception. "Deployment failed. Rolling back."))
                (catch Exception e (throw (Exception. "Rollback failed. System may be in an invalid state.")))))))))
 
-(defn deploy-new-app-instances [app image count]
+(defn deploy-new-app-instances [app image count internal-port]
   (let [count (if (string? count) (read-string count) count)
-        dist (into {} (map #(vector % (count (get-containers %))) (load-hosts)))
+        dist (into {} (map #(vector % (clojure.core/count (get-containers %))) (load-hosts)))
         total-containers (apply + (map second dist))
         hosts (vec (keys dist))
         total-hosts (clojure.core/count hosts)
@@ -158,12 +158,12 @@
                           launching))))]
     (doseq [host hosts]
       (dotimes [n (launching host)]
-        (deploy-app-instance app host (find-available-port host) image)))))
+        (deploy-app-instance app host (find-available-port host) internal-port image)))))
 
-(defn deploy-app-instances [app image count]
+(defn deploy-app-instances [app image count internal-port]
   (println "Deploying" count app "with" image)
   (let [instances (load-app-instances app)]
-    (deploy-new-app-instances app image count)
+    (deploy-new-app-instances app image count internal-port)
     (save-deployments app image count)
     (doseq [instance instances]
       (let [[image tag] (ssplit instance)]
@@ -229,13 +229,13 @@
   (if-let [app (extract-app req)]
     (if-let [instances (get-in @router [:instances app])]
       (if (seq instances)
-        (if-let [instance (rand-nth (vec (clojure.set/difference instances (:unhealthy @router))))]
+        (if-let [instance (rand-nth (vec (clojure.set/difference (set instances) (:unhealthy @router))))]
           (with-channel req channel
             (http/request
-             {:url (str (name (:scheme req)) "://" instance (:uri req))
+             {:url (str (name (:scheme req)) "://" instance (:uri req)
+                        (let [q (:query-string req)] (if (clojure.string/blank? q) "" (str "?" q))))
               :method (:request-method req)
               :headers (:headers req)
-              :query-params (:query-params req)
               :form-params (:form-params req)
               :body (:body req)
               :basic-auth ((:headers req) "basic-auth")
@@ -254,7 +254,6 @@
     (pipe req)))
 
 (defn init []
-  (init-routing-table)
   (car/with-new-pubsub-listener (redis-conf) {"updates" (fn [_] (init-routing-table))}
     (car/subscribe "updates"))
   (future
@@ -262,3 +261,5 @@
       (health-check-instances)
       (Thread/sleep 10000)
       (recur))))
+
+(init-routing-table)
