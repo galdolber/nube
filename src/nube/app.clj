@@ -57,6 +57,10 @@
 (defn add-app-instance [app instance] (redis! (car/sadd (str app ":instances") instance) (notify-routers)))
 (defn remove-app-instance [app instance] (redis! (car/srem (str app ":instances") instance) (notify-routers)))
 
+(defn load-pending-app-instances [app] (redis! (car/smembers (str app ":pending-instances"))))
+(defn add-pending-app-instance [app instance] (redis! (car/sadd (str app ":pending-instances") instance)))
+(defn remove-pending-app-instance [app instance] (redis! (car/srem (str app ":pending-instances") instance)))
+
 (defn load-hosts [] (redis! (car/smembers :hosts)))
 (defn add-host [host] (redis! (car/sadd :hosts host)))
 (defn remove-host [host] (redis! (car/srem :hosts host)))
@@ -138,8 +142,8 @@
         (stop-container host id)
         (throw (Exception. "Failed to deploy new instance.")))
       (try
-        (println "Adding" (str host ":" port) "to router")
-        (add-app-instance app (str host ":" port))
+        (println "Adding" (str host ":" port) "to as pending")
+        (add-pending-app-instance app (str host ":" port))
         (catch Exception e
           (println "Deploy failed. Rolling back.")
           (try (kill-app-instance app host port)
@@ -166,12 +170,24 @@
 
 (defn deploy-app-instances [app image count internal-port]
   (println "Deploying" count app "with" image)
-  (let [instances (load-app-instances app)]
-    (deploy-new-app-instances app image count internal-port)
-    (save-deployments app image count)
-    (doseq [instance instances]
-      (let [[image tag] (ssplit instance)]
-        (kill-app-instance app image tag)))))
+  (try
+    (let [instances (load-app-instances app)]
+      (deploy-new-app-instances app image count internal-port)
+      (save-deployments app image count)
+      (doseq [instance (load-pending-app-instances app)]
+        (add-app-instance app instance)
+        (remove-pending-app-instance app instance))
+      (doseq [instance instances]
+        (let [[image tag] (ssplit instance)]
+          (kill-app-instance app image tag))))
+    "App successfully deployed!"
+    (catch Exception e
+      (println "Rolling back deploy")
+      (doseq [instance (load-pending-app-instances app)]
+        (let [[host port] instance]          
+          (stop-container host port))
+        (remove-pending-app-instance app instance))
+      (throw e))))
 
 (defn load-app-logs [app]
   (vec
