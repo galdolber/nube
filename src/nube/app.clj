@@ -122,8 +122,9 @@
            (recur (dec n))))))))
 
 (defn health-check-instances []
-  (doseq [i (vals (:instances @router))]
-    (health-check-host i 80)))
+  (doseq [l (vals (:instances @router))]
+    (doseq [i l]
+      (health-check-host i 80))))
 
 (defn pull-docker-image [host image]
   (let [[image tag] (ssplit image)]
