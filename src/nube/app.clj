@@ -178,10 +178,10 @@
         (kill-app-instance app image tag)))))
 
 (defn load-app-logs [app]
-  (for [instance (load-app-instances app)]
-    (let [[host port] (ssplit instance)]
-      (println "Loading logs for" instance)
-      #_(logs (docker-cli host) (:Id (load-container-by-host-and-port host port))))))
+  (vec
+   (for [instance (load-app-instances app)]
+     (let [[host port] (ssplit instance)]
+       (docker! :get host (str "containers/" (:Id (load-container-by-host-and-port host port)) "/logs"))))))
 
 (defn kill-app-instances [app]
   (doseq [instance (load-app-instances app)]
