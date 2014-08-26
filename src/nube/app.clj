@@ -264,7 +264,6 @@
   (init-routing-table)
   (car/with-new-pubsub-listener (redis-conf) {"updates" (fn [_] (init-routing-table))}
     (car/subscribe "updates"))
-  (redis! (car/publish "updates" 1))
   (future
     (loop []
       (health-check-instances)
