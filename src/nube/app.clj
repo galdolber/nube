@@ -118,7 +118,7 @@
        (if (= 200 (:status @(http/get (str "http://" host ":" port "/") {:timeout 5000})))
          true
          (do
-           (Thread/sleep 1000)
+           (Thread/sleep (* (- 10 n) 100))
            (recur (dec n))))))))
 
 (defn health-check-instances []
