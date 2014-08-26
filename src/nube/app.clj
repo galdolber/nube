@@ -4,19 +4,22 @@
             [clojure.data.json :as json]
             [org.httpkit.client :as http]
             [org.httpkit.server :refer [with-channel send!]]
-            [pandect.core :refer [sha1]]))
+            [pandect.core :refer [sha1]]
+            [ring.middleware.basic-authentication :refer [basic-authentication-request authentication-failure]]))
 
 (def env (atom {:controller "localhost"
-                :redis-host "127.0.0.1"
-                :redis-port "6379"
-                :docker-port "4243"}))
+                :port "8080"
+                :redishost "127.0.0.1"
+                :redisport "6379"
+                :dockerport "4243"}))
 
 (defn redis-conf []
-  {:host (:redis-host @env)
-   :port (read-string (:redis-port @env))
-   :password (:redis-password @env)})
+  {:spec {:host (:redishost @env)
+          :port (read-string (:redisport @env))
+          :password (:redispassword @env)}})
 
 (defmacro redis! [& body] `(car/wcar (redis-conf) ~@body))
+
 (def port-range (set (range 8000 8999)))
 (def router (atom {:instances {} :envs {} :unhealthy #{}}))
 
@@ -27,7 +30,7 @@
 (defn docker!
   ([method host uri] (docker! method host uri {}))
   ([method host uri options]
-     (let [res @((if (= :get method) http/get http/post) (str "http://" host ":" (:docker-port @env) "/" uri) options)
+     (let [res @((if (= :get method) http/get http/post) (str "http://" host ":" (:dockerport @env) "/" uri) options)
            status (:status res)]
        (if (and status (< 199 status 300))
           (let [body (:body res)]
@@ -46,9 +49,9 @@
 (defn add-app [app] (redis! (car/sadd :apps app)))
 (defn remove-app [app] (redis! (car/srem :apps app)))
 
-(defn add-app-env [app env] (redis! (car/sadd (str app ":envs") env)))
-(defn remove-app-env [app env] (redis! (car/srem (str app ":envs") env)))
-(defn load-app-envs [app] (redis! (car/smembers (str app ":envs"))))
+(defn add-app-env [app env val] (redis! (car/hset (str app ":envs") env val)))
+(defn remove-app-env [app env] (redis! (car/hdel (str app ":envs") env)))
+(defn load-app-envs [app] (apply hash-map (redis! (car/hgetall (str app ":envs")))))
 
 (defn load-app-instances [app] (redis! (car/smembers (str app ":instances"))))
 (defn add-app-instance [app instance] (redis! (car/sadd (str app ":instances") instance) (notify-routers)))
@@ -71,7 +74,8 @@
 (defn run-container [host port internal-port image envs]
   (let [internal-port (or internal-port "80/tcp")
         options {:Hostname "" :User "" :AttachStdin false :AttachStdout true :AttachStderr true
-                 :Tty true :OpenStdin false :StdinOnce false :Cmd nil :Volumes {} :Env envs
+                 :Tty true :OpenStdin false :StdinOnce false :Cmd nil :Volumes {}
+                 :Env (mapv (fn [[k v]] (str k "=" v)) envs)
                  :Image image :ExposedPorts {internal-port {}}}
         start-options {:PortBindings {internal-port [{:HostPort (str port)}]}}
         id (:Id (docker! :post host "containers/create"
@@ -201,7 +205,7 @@
                 "/instances" #'load-app-instances
                 "/history" #'load-deployments
                 "/envs" {"" #'load-app-envs
-                         ["/add/" :env] #'add-app-env
+                         ["/add/" :env "/" :val] #'add-app-env
                          ["/delete/" :env] #'remove-app-env}
                 "/logs" #'load-app-logs
                 "/kill" #'kill-app-instances}}])
@@ -213,7 +217,7 @@
       (try
         {:status 200
          :headers {"Content-Type" "text/plain"}
-         :body (pr-str (apply (var-get handler) fn-params))}
+         :body (pr-str {:data (or (apply (var-get handler) fn-params) :ok)})}
         (catch Exception e
           (.printStackTrace e)
           {:status 500
@@ -225,27 +229,35 @@
 
 (defn extract-app [req] (first (ssplit ((:headers req) "host"))))
 
+(defn pipe-instance [req app]
+  (if-let [instances (get-in @router [:instances app])]
+    (if (seq instances)
+      (if-let [instance (rand-nth (vec (clojure.set/difference (set instances) (:unhealthy @router))))]
+        (with-channel req channel
+          (http/request
+           {:url (str (name (:scheme req)) "://" instance (:uri req)
+                      (let [q (:query-string req)] (if (clojure.string/blank? q) "" (str "?" q))))
+            :method (:request-method req)
+            :headers (:headers req)
+            :form-params (:form-params req)
+            :body (:body req)
+            :user-agent ((:headers req) "user-agent")}
+           #(send! channel {:status (:status %)
+                            :body (:body %)
+                            :headers (into {} (map (fn [[k v]] (vector (name k) v)) (:headers %)))})))
+        {:status 503 :body (str "No backend available for " app)})
+      {:status 503 :body (str "No backend available for " app)})
+    {:status 404 :body (str "No backend found for " app)}))
+
 (defn pipe [req]
   (if-let [app (extract-app req)]
-    (if-let [instances (get-in @router [:instances app])]
-      (if (seq instances)
-        (if-let [instance (rand-nth (vec (clojure.set/difference (set instances) (:unhealthy @router))))]
-          (with-channel req channel
-            (http/request
-             {:url (str (name (:scheme req)) "://" instance (:uri req)
-                        (let [q (:query-string req)] (if (clojure.string/blank? q) "" (str "?" q))))
-              :method (:request-method req)
-              :headers (:headers req)
-              :form-params (:form-params req)
-              :body (:body req)
-              :basic-auth ((:headers req) "basic-auth")
-              :user-agent ((:headers req) "user-agent")}
-             #(send! channel {:status (:status %)
-                              :body (:body %)
-                              :headers (into {} (map (fn [[k v]] (vector (name k) v)) (:headers %)))})))
-          {:status 503 :body (str "No backend available for " app)})
-        {:status 503 :body (str "No backend available for " app)})
-      {:status 404 :body (str "No backend found for " app)})
+    (let [envs (load-app-envs app)]
+      (if (envs "auth-user")
+        (let [auth-req (basic-authentication-request req #(and (= % (envs "auth-user")) (= %2 (envs "auth-password"))))]
+          (if (:basic-authentication auth-req)
+            (pipe-instance auth-req app)
+            (authentication-failure nil nil)))
+        (pipe-instance req app)))
     {:status 404 :body "Invalid hostname"}))
 
 (defn app [req]
@@ -254,7 +266,8 @@
     (pipe req)))
 
 (defn init []
-  (car/with-new-pubsub-listener (redis-conf) {"updates" (fn [_] (init-routing-table))}
+  (init-routing-table)
+  (car/with-new-pubsub-listener (:spec (redis-conf)) {"updates" (fn [_] (init-routing-table))}
     (car/subscribe "updates"))
   (future
     (loop []
@@ -262,4 +275,3 @@
       (Thread/sleep 10000)
       (recur))))
 
-(init-routing-table)
