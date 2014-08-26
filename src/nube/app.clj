@@ -215,7 +215,7 @@
 
 (defn controller-app [{:keys [params uri] :as req}]
   (if-let [{:keys [handler route-params] :as all} (match-route routes uri)]
-    (let [params (merge route-params (into {} (map (fn [[k v]] [(keyword k) v]) params)))
+    (let [params (merge (into {} (map (fn [[k v]] [(keyword k) v]) params)) route-params)
           fn-params (mapv params (map (comp keyword name) (first (:arglists (meta handler)))))]
       (try
         {:status 200
