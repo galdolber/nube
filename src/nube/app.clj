@@ -236,7 +236,7 @@
                 "/kill" #'kill-app-instances}}])
 
 (defn controller-app [{:keys [params uri] :as req}]
-  (if-not (= (get-token) (params "x-token"))
+  (if-not (= (get-token) (params "x-token")) ; todo move to headers when the CLI is ready
     {:status 500
      :headers {"Content-Type" "text/plain"}
      :body (pr-str {:error "Bad token"})}
