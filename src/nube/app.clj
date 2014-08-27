@@ -70,6 +70,7 @@
   (redis! (car/lpush (str "deployments:" app)
                      {:timestamp (java.util.Date.)
                       :app app
+                      :instances (load-pending-app-instances app)
                       :image image
                       :count count})))
 
