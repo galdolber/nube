@@ -36,10 +36,8 @@
           (let [body (:body res)]
             (if (clojure.string/blank? body)
               {}
-              (json/read-str body :key-fn keyword)))
-          (do
-            (println res)
-            (throw (Exception. (str "Docker remote api error. Status: " status))))))))
+              (json/read-str body :key-fn keyword)))          
+          (throw (Exception. (str "Docker remote api error. Status: " status)))))))
 
 (defn ssplit [s] (when s (clojure.string/split s #":")))
 (defn create-token [] (let [token (sha1 (pr-str (java.util.Date.)))] (redis! (car/set :token token)) token))
