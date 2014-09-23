@@ -114,12 +114,12 @@
 
 (defn health-check-host [host port]
   (mark-host-health (str host ":" port)
-   (loop [n 10]
+   (loop [n 15]
      (when (pos? n)
        (if (= 200 (:status @(http/get (str "http://" host ":" port "/") {:timeout 5000})))
          true
          (do
-           (Thread/sleep (* (- 10 n) 500))
+           (Thread/sleep (* (- 15 n) 500))
            (recur (dec n))))))))
 
 (defn health-check-instances []
