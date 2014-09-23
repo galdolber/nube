@@ -191,6 +191,7 @@
           (kill-app-instance app image tag))))
     "App successfully deployed!"
     (catch Exception e
+      (.printStackTrace e)
       (println "Rolling back deploy")
       (doseq [instance (load-pending-app-instances app)]
         (let [[host port] (ssplit instance)]          
@@ -305,6 +306,6 @@
   (future
     (loop []
       (health-check-instances)
-      (Thread/sleep 10000)
+      (Thread/sleep 5000)
       (recur))))
 
