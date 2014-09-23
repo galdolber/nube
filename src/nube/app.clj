@@ -261,7 +261,7 @@
 
 (defn extract-app [req] (first (ssplit ((:headers req) "host"))))
 
-(defn pipe-instance [req app]
+(defn pipe-instance [req app]  
   (if-let [instances (get-in @router [:instances app])]
     (if (seq instances)
       (if-let [instance (rand-nth (vec (clojure.set/difference (set instances) (:unhealthy @router))))]
@@ -271,7 +271,7 @@
                       (let [q (:query-string req)] (if (clojure.string/blank? q) "" (str "?" q))))
             :method (:request-method req)
             :headers (:headers req)
-            :form-params (:form-params req)
+                                        ;:form-params (:form-params req)
             :body (:body req)
             :user-agent ((:headers req) "user-agent")}
            #(send! channel {:status (:status %)
