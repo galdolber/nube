@@ -37,7 +37,9 @@
             (if (clojure.string/blank? body)
               {}
               (json/read-str body :key-fn keyword)))
-          (throw (Exception. (str "Docker remote api error. Status: " status)))))))
+          (do
+            (println res)
+            (throw (Exception. (str "Docker remote api error. Status: " status))))))))
 
 (defn ssplit [s] (when s (clojure.string/split s #":")))
 (defn create-token [] (let [token (sha1 (pr-str (java.util.Date.)))] (redis! (car/set :token token)) token))
@@ -191,7 +193,6 @@
           (kill-app-instance app image tag))))
     "App successfully deployed!"
     (catch Exception e
-      (.printStackTrace e)
       (println "Rolling back deploy")
       (doseq [instance (load-pending-app-instances app)]
         (let [[host port] (ssplit instance)]          
