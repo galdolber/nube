@@ -41,7 +41,8 @@
 (defn notify-routers [] (redis! (car/publish "updates" (java.util.Date.))))
 
 (defn load-apps [] (redis! (car/smembers :apps)))
-(defn add-app [app] (redis! (car/sadd :apps app)))
+(defn add-app [app] (redis! (car/sadd :apps app)
+                            (redis! (car/rpush (str "frontend:" app) app))))
 (defn remove-app [app] (redis! (car/srem :apps app)))
 
 (defn add-app-env [app env val] (redis! (car/hset (str app ":envs") env val)))
@@ -49,8 +50,8 @@
 (defn load-app-envs [app] (apply hash-map (redis! (car/hgetall (str app ":envs")))))
 
 (defn load-app-instances [app] (redis! (car/lrange (str "frontend:" app) 0 -1)))
-(defn add-app-instance [app instance] (redis! (car/rpush (str "frontend:" app) instance)))
-(defn remove-app-instance [app instance] (redis! (car/lrem (str "frontend:" app) 0 instance)))
+(defn add-app-instance [app instance] (redis! (car/rpush (str "frontend:" app) (str "http://" instance))))
+(defn remove-app-instance [app instance] (redis! (car/lrem (str "frontend:" app) 0 (str "http://" instance))))
 
 (defn load-pending-app-instances [app] (redis! (car/smembers (str app ":pending-instances"))))
 (defn add-pending-app-instance [app instance] (redis! (car/sadd (str app ":pending-instances") instance)))
