@@ -49,7 +49,7 @@
 (defn remove-app-env [app env] (redis! (car/hdel (str app ":envs") env)))
 (defn load-app-envs [app] (apply hash-map (redis! (car/hgetall (str app ":envs")))))
 
-(defn load-app-instances [app] (redis! (car/lrange (str "frontend:" app) 0 -1)))
+(defn load-app-instances [app] (mapv #(subs % 7) (redis! (car/lrange (str "frontend:" app) 0 -1))))
 (defn add-app-instance [app instance] (redis! (car/rpush (str "frontend:" app) (str "http://" instance))))
 (defn remove-app-instance [app instance] (redis! (car/lrem (str "frontend:" app) 0 (str "http://" instance))))
 
@@ -137,7 +137,6 @@
         (add-pending-app-instance app (str host ":" port))
         :ok
         (catch Exception e
-          (.printStackTrace e)
           (println "Deploy failed. Rolling back.")
           (try (kill-app-instance app host port)
                (Exception. "Deployment failed. Rolling back.")
