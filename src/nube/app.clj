@@ -49,7 +49,7 @@
 (defn remove-app-env [app env] (redis! (car/hdel (str app ":envs") env)))
 (defn load-app-envs [app] (apply hash-map (redis! (car/hgetall (str app ":envs")))))
 
-(defn load-app-instances [app] (mapv #(subs % 7) (redis! (car/lrange (str "frontend:" app) 0 -1))))
+(defn load-app-instances [app] (mapv #(subs % 7) (next (redis! (car/lrange (str "frontend:" app) 0 -1)))))
 (defn add-app-instance [app instance] (redis! (car/rpush (str "frontend:" app) (str "http://" instance))))
 (defn remove-app-instance [app instance] (redis! (car/lrem (str "frontend:" app) 0 (str "http://" instance))))
 
@@ -118,9 +118,11 @@
     (docker! :post host (str "images/create?fromImage=" image (if tag (str "&tag=" tag) "")))))
 
 (defn kill-app-instance [app host port]
-  (println "Killing instance at" (str host ":" port))
-  (stop-container-by-port host port)
-  (remove-app-instance app (str host ":" port)))
+  (try
+    (println "Killing instance at" (str host ":" port))
+    (stop-container-by-port host port)
+    (remove-app-instance app (str host ":" port))
+    (catch Exception e nil)))
 
 (defn deploy-app-instance [app host port internal-port image]
   (println "Pulling new tags for" image)
