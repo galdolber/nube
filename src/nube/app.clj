@@ -137,6 +137,7 @@
         (add-pending-app-instance app (str host ":" port))
         :ok
         (catch Exception e
+          (.printStackTrace e)
           (println "Deploy failed. Rolling back.")
           (try (kill-app-instance app host port)
                (Exception. "Deployment failed. Rolling back.")
