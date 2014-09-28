@@ -21,11 +21,6 @@
 (defmacro redis! [& body] `(car/wcar (redis-conf) ~@body))
 
 (def port-range (set (range 8000 8999)))
-(def router (atom {:instances {} :envs {} :unhealthy #{}}))
-
-(defn mark-host-health [host healthy]
-  (swap! router update-in [:unhealthy] #((if healthy disj conj) % host))
-  healthy)
 
 (defn docker!
   ([method host uri] (docker! method host uri {}))
@@ -53,9 +48,9 @@
 (defn remove-app-env [app env] (redis! (car/hdel (str app ":envs") env)))
 (defn load-app-envs [app] (apply hash-map (redis! (car/hgetall (str app ":envs")))))
 
-(defn load-app-instances [app] (redis! (car/smembers (str app ":instances"))))
-(defn add-app-instance [app instance] (redis! (car/sadd (str app ":instances") instance) (notify-routers)))
-(defn remove-app-instance [app instance] (redis! (car/srem (str app ":instances") instance) (notify-routers)))
+(defn load-app-instances [app] (redis! (car/lrange (str "frontend:" app) 0 -1)))
+(defn add-app-instance [app instance] (redis! (car/rpush (str "frontend:" app) instance)))
+(defn remove-app-instance [app instance] (redis! (car/lrem (str "frontend:" app) 0 instance)))
 
 (defn load-pending-app-instances [app] (redis! (car/smembers (str app ":pending-instances"))))
 (defn add-pending-app-instance [app instance] (redis! (car/sadd (str app ":pending-instances") instance)))
@@ -92,10 +87,6 @@
               :body (json/write-str start-options)})
     id))
 
-(defn init-routing-table []
-  (doseq [app (load-apps)]
-    (swap! router assoc-in [:instances app] (load-app-instances app))))
-
 (defn load-ports-in-use [host]
   (set (mapv #(:PublicPort (first (:Ports %))) (get-containers host))))
 
@@ -112,21 +103,14 @@
   (when-let [id (:Id (load-container-by-host-and-port host port))]
     (stop-container host id)))
 
-(defn health-check-host [host port]
-  (mark-host-health (str host ":" port)
-   (loop [n 15]
-     (when (pos? n)
-       (if (= 200 (:status @(http/get (str "http://" host ":" port "/") {:timeout 5000})))
-         true
-         (do
-           (Thread/sleep (* (- 15 n) 500))
-           (recur (dec n))))))))
-
-(defn health-check-instances []
-  (doseq [l (vals (:instances @router))]
-    (doseq [i l]
-      (let [[host port] (ssplit i)]
-        (health-check-host host port)))))
+(defn health-check-host [host port]  
+  (loop [n 15]
+    (when (pos? n)
+      (if (= 200 (:status @(http/get (str "http://" host ":" port "/") {:timeout 5000})))
+        true
+        (do
+          (Thread/sleep (* (- 15 n) 500))
+          (recur (dec n)))))))
 
 (defn pull-docker-image [host image]
   (let [[image tag] (ssplit image)]
@@ -135,8 +119,7 @@
 (defn kill-app-instance [app host port]
   (println "Killing instance at" (str host ":" port))
   (stop-container-by-port host port)
-  (remove-app-instance app (str host ":" port))
-  (mark-host-health (str host ":" port) true))
+  (remove-app-instance app (str host ":" port)))
 
 (defn deploy-app-instance [app host port internal-port image]
   (println "Pulling new tags for" image)
@@ -261,50 +244,7 @@
 
 (defn extract-app [req] (first (ssplit ((:headers req) "host"))))
 
-(defn pipe-instance [req app]  
-  (if-let [instances (get-in @router [:instances app])]
-    (if (seq instances)
-      (if-let [instance (rand-nth (vec (clojure.set/difference (set instances) (:unhealthy @router))))]
-        (with-channel req channel
-          (http/request
-           {:url (str (name (:scheme req)) "://" instance (:uri req)
-                      (let [q (:query-string req)] (if (clojure.string/blank? q) "" (str "?" q))))
-            :method (:request-method req)
-            :headers (:headers req)
-                                        ;:form-params (:form-params req)
-            :body (:body req)
-            :user-agent ((:headers req) "user-agent")}
-           #(send! channel {:status (:status %)
-                            :body (:body %)
-                            :headers (into {} (map (fn [[k v]] (vector (name k) v)) (:headers %)))})))
-        {:status 503 :body (str "No backend available for " app)})
-      {:status 503 :body (str "No backend available for " app)})
-    {:status 404 :body (str "No backend found for " app)}))
+(defn app [req] (controller-app req))
 
-(defn pipe [req]
-  (if-let [app (extract-app req)]
-    (let [envs (load-app-envs app)]
-      (if (envs "auth-user")
-        (let [auth-req (basic-authentication-request req #(and (= % (envs "auth-user")) (= %2 (envs "auth-password"))))]
-          (if (:basic-authentication auth-req)
-            (pipe-instance auth-req app)
-            (authentication-failure nil nil)))
-        (pipe-instance req app)))
-    {:status 404 :body "Invalid hostname"}))
-
-(defn app [req]
-  (if (= (:controller @env) (extract-app req))
-    (controller-app req)
-    (pipe req)))
-
-(defn init []
-  (get-token)
-  (init-routing-table)
-  (car/with-new-pubsub-listener (:spec (redis-conf)) {"updates" (fn [_] (init-routing-table))}
-    (car/subscribe "updates"))
-  (future
-    (loop []
-      (health-check-instances)
-      (Thread/sleep 5000)
-      (recur))))
+(defn init [] (get-token))
 
